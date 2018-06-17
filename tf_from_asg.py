@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 import boto3
 import base64
-from jinja2 import Environment, BaseLoader
+from jinja2 import Environment, BaseLoader, Template
 
 
 DEFAULT_TEMPLATE = '''
@@ -34,23 +34,50 @@ ASG_TEMPLATE = 'terraform import module.{}.aws_autoscaling_group.qw-asg {}'
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('--template-file', dest='template_file')
+    parser.add_argument('--template-file', default=None, dest='template_file')
     parser.add_argument('--asg-prefix', dest='prefix')
+    parser.add_argument('--aws-env', default='klaviyo-dev', dest='aws_env')
+    parser.add_argument('--output-file', default=None, dest='output_file')
     args = parser.parse_args()
     template_filename = args.template_file
-    template = Environment(loader=BaseLoader).from_string(DEFAULT_TEMPLATE)
+    if template_filename:
+        with open(args.template_file, 'r') as template_file:
+            template = Template(template_file.read())
+    else:
+        template = Environment(loader=BaseLoader).from_string(DEFAULT_TEMPLATE)
+
     prefix = args.prefix
-    client = boto3.client('autoscaling')
+    client = boto3.session.Session(profile_name=args.aws_profile).client('autoscaling')
 
-    asg_paginator = client.get_paginator('describe_auto_scaling_groups')
-    asg_iterator = asg_paginator.paginate()
+    asgs_to_process = get_autoscaling_information(client, prefix)
 
+    print 'Processing the following autoscaling groups:'
+    # Item is the ASG Name
+    # Value is the dict of collected information
+    import_statements = []
+    terraform_modules = []
+    for asg_name, asg_info in asgs_to_process.iteritems():
+        terraform_modules.append(generate_tf_for_asg(asg_info, template))
+        import_statements.extend(import_statements_from_asg(asg_name, asg_info))
+
+    if args.output_file:
+        with open(args.output_file, 'w') as output_file:
+            output_file.write('Generated Module Code:\n')
+            output_file.writelines(terraform_modules)
+            output_file.write('Generated Import Code:\n')
+            output_file.writelines(import_statements)
+    else:
+
+
+def get_autoscaling_information(autoscaling_client, asg_name_prefix):
     # Don't clever up the place - iterate over all ASGs, for each which matches the prefix, pull the relevant data.
     # Later go and stitch in the LC sourced information
+    asg_paginator = autoscaling_client.get_paginator('describe_auto_scaling_groups')
+    asg_iterator = asg_paginator.paginate()
     asgs_to_process = {}
     for response in asg_iterator:
         for asg_response in response['AutoScalingGroups']:
-            if asg_response['AutoScalingGroupName'].startswith(prefix):
+            if asg_response['AutoScalingGroupName'].startswith(asg_name_prefix):
                 asgs_to_process[asg_response['AutoScalingGroupName']] = {
                     'name' : asg_response['AutoScalingGroupName'],
                     'tags' : asg_response['Tags'],
@@ -61,7 +88,7 @@ def main():
                 }
 
     lc_to_asg_name = {asg['lc_name'] : asg['name'] for asg in asgs_to_process.values()}
-    lc_paginator = client.get_paginator('describe_launch_configurations')
+    lc_paginator = autoscaling_client.get_paginator('describe_launch_configurations')
 
     # Criminally inefficient. Should probably iterate over the LCs we actually want, but the paginator is limited to
     # 50 names when passing em in and I'd prefer not to implement my own pagination
@@ -73,18 +100,7 @@ def main():
 
             asgs_to_process[lc_to_asg_name[lc['LaunchConfigurationName']]]['lc_info'] = get_launch_config_template_data_for_response(lc)
 
-    print 'Processing the following autoscaling groups:'
-    # Item is the ASG Name
-    # Value is the dict of collected information
-    import_statements = []
-    for asg_name, asg_info in asgs_to_process.iteritems():
-        print generate_tf_for_asg(asg_info, template)
-        import_statements.extend(import_statements_from_asg(asg_name, asg_info))
-
-    #for statement in import_statements:
-    #    print statement
-
-
+    return asgs_to_process
 
 def get_launch_config_template_data_for_response(launch_configuration_response):
     # Take the LC Response info and rip out the consumer config.
@@ -97,9 +113,9 @@ def get_launch_config_template_data_for_response(launch_configuration_response):
 def generate_tf_for_asg(asg_info, template):
     # TODO: Template the TF bits from the ASG info we've pulled. Might not be perfect, but we can take a rough cut
     # TODO: Are there material differences between Module, asg and queue names?
-    # TODO: Pull module name calculation into a sensible helper
-    asg_context = {'MODULE_NAME' : asg_info['name'].replace('/', '_').replace('.', '_'),
-                   'ASG_CLUSTER' : asg_info['name'].replace('/', '-').replace('.', '-'),
+    cluster_name = get_dns_safe_cluster_name(asg_info)
+    asg_context = {'MODULE_NAME' : cluster_name,
+                   'ASG_CLUSTER' : cluster_name,
                    'CONSUMER_CONFIG' : asg_info['lc_info'],
                    'ASG_NAME' : asg_info['name'],
                    'QUEUE_NAME' : get_queue_from_info(asg_info),
@@ -116,9 +132,12 @@ def get_queue_from_info(asg_info):
 
 def import_statements_from_asg(asg_name, asg_info):
     # asg_info is asg_name -> dictionary of collected infor
-    return [LC_TEMPLATE.format(asg_info['name'].replace('/', '_').replace('.', '_'), asg_info['lc_name']),
-            ASG_TEMPLATE.format(asg_info['name'].replace('/', '_').replace('.', '_'), asg_name)]
+    cluster_name = get_dns_safe_cluster_name(asg_info)
+    return [LC_TEMPLATE.format(cluster_name, asg_info['lc_name']),
+            ASG_TEMPLATE.format(cluster_name, asg_name)]
 
+def get_dns_safe_cluster_name(asg_info):
+    return asg_info['name'].replace('/', '_').replace('.', '_')
 
 if __name__ == '__main__':
     main()
