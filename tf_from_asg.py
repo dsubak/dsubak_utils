@@ -67,7 +67,12 @@ def main():
             output_file.write('Generated Import Code:\n')
             output_file.writelines(import_statements)
     else:
-
+        print 'Generated Module Code:\n'
+        for module in terraform_modules:
+            print module
+        print 'Generated Import Code:\n'
+        for import_statement in import_statements:
+            print import_statement
 
 def get_autoscaling_information(autoscaling_client, asg_name_prefix):
     # Don't clever up the place - iterate over all ASGs, for each which matches the prefix, pull the relevant data.
@@ -112,7 +117,7 @@ def get_launch_config_template_data_for_response(launch_configuration_response):
 
 def generate_tf_for_asg(asg_info, template):
     # TODO: Template the TF bits from the ASG info we've pulled. Might not be perfect, but we can take a rough cut
-    # TODO: Are there material differences between Module, asg and queue names?
+    # TODO: Think about whether or not we can make this more reusable - right now it's heavily tied to the current qw module implementation
     cluster_name = get_dns_safe_cluster_name(asg_info)
     asg_context = {'MODULE_NAME' : cluster_name,
                    'ASG_CLUSTER' : cluster_name,
