@@ -47,11 +47,12 @@ def main():
         template = Environment(loader=BaseLoader).from_string(DEFAULT_TEMPLATE)
 
     prefix = args.prefix
-    client = boto3.session.Session(profile_name=args.aws_profile).client('autoscaling')
+    client = boto3.session.Session(profile_name=args.aws_env).client('autoscaling')
 
     asgs_to_process = get_autoscaling_information(client, prefix)
 
     print 'Processing the following autoscaling groups:'
+    print asgs_to_process
     # Item is the ASG Name
     # Value is the dict of collected information
     import_statements = []
@@ -118,9 +119,10 @@ def get_launch_config_template_data_for_response(launch_configuration_response):
 def generate_tf_for_asg(asg_info, template):
     # TODO: Template the TF bits from the ASG info we've pulled. Might not be perfect, but we can take a rough cut
     # TODO: Think about whether or not we can make this more reusable - right now it's heavily tied to the current qw module implementation
-    cluster_name = get_dns_safe_cluster_name(asg_info)
+    dns_cluster_name = get_dns_safe_cluster_name(asg_info)
+    cluster_name = get_cluster_name(asg_info)
     asg_context = {'MODULE_NAME' : cluster_name,
-                   'ASG_CLUSTER' : cluster_name,
+                   'ASG_CLUSTER' : dns_cluster_name,
                    'CONSUMER_CONFIG' : asg_info['lc_info'],
                    'ASG_NAME' : asg_info['name'],
                    'QUEUE_NAME' : get_queue_from_info(asg_info),
@@ -142,6 +144,9 @@ def import_statements_from_asg(asg_name, asg_info):
             ASG_TEMPLATE.format(cluster_name, asg_name)]
 
 def get_dns_safe_cluster_name(asg_info):
+    return asg_info['name'].replace('/', '-').replace('.', '-')
+
+def get_cluster_name(asg_info):
     return asg_info['name'].replace('/', '_').replace('.', '_')
 
 if __name__ == '__main__':
