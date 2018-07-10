@@ -34,6 +34,9 @@ module "{{ MODULE_NAME }}" {
 LC_TEMPLATE = 'terraform import module.{}.aws_launch_configuration.qw-asg-launch-config {}'
 ASG_TEMPLATE = 'terraform import module.{}.aws_autoscaling_group.qw-asg {}'
 
+DEREGISTRATION_ARN = 'arn:aws:sns:us-east-1:368154587575:qw_autoscale_events'
+LIFECYCLE_HOOK_ARN = 'arn:aws:iam::368154587575:role/AutoScalingNotificationAccessRole'
+
 def main():
     parser = ArgumentParser()
     parser.add_argument('--template-file', default=None, dest='template_file')
@@ -89,8 +92,6 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
                 lifecycle_hook_response = autoscaling_client.describe_lifecycle_hooks(
                     AutoScalingGroupName=asg_response['AutoScalingGroupName']
                 )
-                # This is true until we add launching hooks, but that very likely won't  matter for any of this work
-                terminating_hook = lifecycle_hook_response['LifecycleHooks'][0]
                 asgs_to_process[asg_response['AutoScalingGroupName']] = {
                     'name' : asg_response['AutoScalingGroupName'],
                     'tags' : asg_response['Tags'],
@@ -98,8 +99,6 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
                     'asg_min' : asg_response['MinSize'],
                     'asg_max' : asg_response['MaxSize'],
                     'asg_desired' : asg_response['DesiredCapacity'],
-                    'deregistration_arn' : terminating_hook['NotificationTargetARN'],
-                    'lifecycle_hook_arn' : terminating_hook['RoleARN']
                 }
 
     lc_to_asg_name = {asg['lc_name'] : asg['name'] for asg in asgs_to_process.values()}
@@ -138,8 +137,8 @@ def generate_tf_for_asg(asg_info, template):
                    'ASG_MIN' : asg_info['asg_min'],
                    'ASG_MAX' : asg_info['asg_max'],
                    'ASG_DESIRED' : asg_info['asg_desired'],
-                    'DEREGISTRATION_ARN' : asg_info['deregistration_arn'],
-                    'LIFECYCLE_HOOK_ARN' : asg_info['lifecycle_hook_arn']
+                   'DEREGISTRATION_ARN' : DEREGISTRATION_ARN,
+                   'LIFECYCLE_HOOK_ARN' : LIFECYCLE_HOOK_ARN
                    }
     return template.render(**asg_context)
 
