@@ -25,6 +25,8 @@ module "{{ MODULE_NAME }}" {
   asg_desired           = "{{ ASG_DESIRED }}"
   asg_max               = "{{ ASG_MAX }}"
   asg_min               = "{{ ASG_MIN }}"
+  deregistration_arn    = "{{ DEREGISTRATION_ARN }}"
+  lifecycle_hook_arn    = "{{ LIFECYCLE_HOOK_ARN }}"
 }
 '''
 
@@ -84,6 +86,11 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
     for response in asg_iterator:
         for asg_response in response['AutoScalingGroups']:
             if asg_response['AutoScalingGroupName'].startswith(asg_name_prefix):
+                lifecycle_hook_response = autoscaling_client.describe_lifecycle_hooks(
+                    AutoScalingGroupName=asg_response['AutoScalingGroupName']
+                )
+                # This is true until we add launching hooks, but that very likely won't  matter for any of this work
+                terminating_hook = lifecycle_hook_response['LifecycleHooks'][0]
                 asgs_to_process[asg_response['AutoScalingGroupName']] = {
                     'name' : asg_response['AutoScalingGroupName'],
                     'tags' : asg_response['Tags'],
@@ -91,6 +98,8 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
                     'asg_min' : asg_response['MinSize'],
                     'asg_max' : asg_response['MaxSize'],
                     'asg_desired' : asg_response['DesiredCapacity'],
+                    'deregistration_arn' : terminating_hook['NotificationTargetARN'],
+                    'lifecycle_hook_arn' : terminating_hook['RoleARN']
                 }
 
     lc_to_asg_name = {asg['lc_name'] : asg['name'] for asg in asgs_to_process.values()}
@@ -129,6 +138,8 @@ def generate_tf_for_asg(asg_info, template):
                    'ASG_MIN' : asg_info['asg_min'],
                    'ASG_MAX' : asg_info['asg_max'],
                    'ASG_DESIRED' : asg_info['asg_desired'],
+                    'DEREGISTRATION_ARN' : asg_info['deregistration_arn'],
+                    'LIFECYCLE_HOOK_ARN' : asg_info['lifecycle_hook_arn']
                    }
     return template.render(**asg_context)
 
