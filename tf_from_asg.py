@@ -8,23 +8,26 @@ DEFAULT_TEMPLATE = '''
 module "{{ MODULE_NAME }}" {
   source = "../modules/autoscaling/qw_asg"
 
-  key_name              = "${var.key_name}"
+  key_name              = "{{ KEY_NAME }}"
   asg_cluster           = "{{ ASG_CLUSTER }}"
-  zones                 = "${var.default_zones}"
+  zones                 = "${var.legacy_zones}"
   asg_queue             = "{{ QUEUE_NAME }}"
   asg_name              = "{{ ASG_NAME }}"
   worker_security_group = ["${var.worker_security_group}"]
   consumer_config       = "{{ CONSUMER_CONFIG }}"
   r53_zone              = "${var.r53_zone}"
   hosted_domain         = "${var.hosted_domain}"
-  vpc_subnet_ids        = ["${split(",", join(",", var.vpc_public_subnet_ids))}"]
+  vpc_subnet_ids        = ["${aws_subnet.qw.*.id}"]
   name_tag              = "${var.name_tag}"
-  zookeeper_dns         = "${module.zookeeper.zookeeper_dns}"
+  zookeeper_dns         = "${var.zookeeper_dns}"
   env                   = "${var.env}"
   app_branch            = "${var.app_branch}"
   asg_desired           = "{{ ASG_DESIRED }}"
   asg_max               = "{{ ASG_MAX }}"
   asg_min               = "{{ ASG_MIN }}"
+  instance_type         = "{{ INSTANCE_TYPE }}"
+  qw_ami                = "{{ AMI_ID }}"
+  iam_role_name         = "AutoscalingEc2InstanceRole"
   deregistration_arn    = "{{ DEREGISTRATION_ARN }}"
   lifecycle_hook_arn    = "{{ LIFECYCLE_HOOK_ARN }}"
 }
@@ -89,9 +92,11 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
     for response in asg_iterator:
         for asg_response in response['AutoScalingGroups']:
             if asg_response['AutoScalingGroupName'].startswith(asg_name_prefix):
-                lifecycle_hook_response = autoscaling_client.describe_lifecycle_hooks(
-                    AutoScalingGroupName=asg_response['AutoScalingGroupName']
-                )
+                launch_config_response = autoscaling_client.describe_launch_configurations(
+                    LaunchConfigurationNames=[
+                        asg_response['LaunchConfigurationName']
+                    ]
+                )['LaunchConfigurations'][0]
                 asgs_to_process[asg_response['AutoScalingGroupName']] = {
                     'name' : asg_response['AutoScalingGroupName'],
                     'tags' : asg_response['Tags'],
@@ -99,6 +104,9 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
                     'asg_min' : asg_response['MinSize'],
                     'asg_max' : asg_response['MaxSize'],
                     'asg_desired' : asg_response['DesiredCapacity'],
+                    'instance_type' : launch_config_response['InstanceType'],
+                    'key_name' : launch_config_response['KeyName'],
+                    'ami_id' : launch_config_response['ImageId']
                 }
 
     lc_to_asg_name = {asg['lc_name'] : asg['name'] for asg in asgs_to_process.values()}
@@ -129,17 +137,22 @@ def generate_tf_for_asg(asg_info, template):
     # TODO: Think about whether or not we can make this more reusable - right now it's heavily tied to the current qw module implementation
     dns_cluster_name = get_dns_safe_cluster_name(asg_info)
     cluster_name = get_cluster_name(asg_info)
-    asg_context = {'MODULE_NAME' : cluster_name,
-                   'ASG_CLUSTER' : dns_cluster_name,
-                   'CONSUMER_CONFIG' : asg_info['lc_info'],
-                   'ASG_NAME' : asg_info['name'],
-                   'QUEUE_NAME' : get_queue_from_info(asg_info),
-                   'ASG_MIN' : asg_info['asg_min'],
-                   'ASG_MAX' : asg_info['asg_max'],
-                   'ASG_DESIRED' : asg_info['asg_desired'],
-                   'DEREGISTRATION_ARN' : DEREGISTRATION_ARN,
-                   'LIFECYCLE_HOOK_ARN' : LIFECYCLE_HOOK_ARN
-                   }
+    asg_context = {
+        'MODULE_NAME' : cluster_name,
+        'ASG_CLUSTER' : dns_cluster_name,
+        'CONSUMER_CONFIG' : asg_info['lc_info'],
+        'ASG_NAME' : asg_info['name'],
+        'QUEUE_NAME' : get_queue_from_info(asg_info),
+        'ASG_MIN' : asg_info['asg_min'],
+        'ASG_MAX' : asg_info['asg_max'],
+        'ASG_DESIRED' : asg_info['asg_desired'],
+        'DEREGISTRATION_ARN' : DEREGISTRATION_ARN,
+        'LIFECYCLE_HOOK_ARN' : LIFECYCLE_HOOK_ARN,
+        'INSTANCE_TYPE' : asg_info['instance_type'],
+        'KEY_NAME' : asg_info['key_name'],
+        'AMI_ID' : asg_info['ami_id']
+    }
+
     return template.render(**asg_context)
 
 def get_queue_from_info(asg_info):
