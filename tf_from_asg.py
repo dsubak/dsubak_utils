@@ -163,7 +163,7 @@ def import_statements_from_asg(asg_name, asg_info):
             ASG_TEMPLATE.format(cluster_name, asg_name)]
 
 def get_dns_safe_cluster_name(asg_info):
-    return asg_info['name'].replace('/', '-').replace('.', '-')
+    return asg_info['name'].replace('/', '-').replace('.', '-').replace('_', '-')
 
 def get_cluster_name(asg_info):
     return asg_info['name'].replace('/', '_').replace('.', '_')
