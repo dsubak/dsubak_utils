@@ -25,7 +25,6 @@ module "{{ MODULE_NAME }}" {
   asg_max               = "{{ ASG_MAX }}"
   asg_min               = "{{ ASG_MIN }}"
   instance_type         = "{{ INSTANCE_TYPE }}"
-  qw_ami                = "{{ AMI_ID }}"
   iam_role_name         = "AutoscalingEc2InstanceRole"
   deregistration_arn    = "{{ DEREGISTRATION_ARN }}"
   lifecycle_hook_arn    = "{{ LIFECYCLE_HOOK_ARN }}"
@@ -105,7 +104,6 @@ def get_autoscaling_information(autoscaling_client, asg_name_prefix):
                     'asg_desired' : asg_response['DesiredCapacity'],
                     'instance_type' : launch_config_response['InstanceType'],
                     'key_name' : launch_config_response['KeyName'],
-                    'ami_id' : launch_config_response['ImageId']
                 }
 
     lc_to_asg_name = {asg['lc_name'] : asg['name'] for asg in asgs_to_process.values()}
@@ -149,7 +147,6 @@ def generate_tf_for_asg(asg_info, template):
         'LIFECYCLE_HOOK_ARN' : LIFECYCLE_HOOK_ARN,
         'INSTANCE_TYPE' : asg_info['instance_type'],
         'KEY_NAME' : asg_info['key_name'],
-        'AMI_ID' : asg_info['ami_id']
     }
 
     return template.render(**asg_context)
