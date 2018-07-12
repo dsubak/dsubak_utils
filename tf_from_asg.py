@@ -6,18 +6,17 @@ from jinja2 import Environment, BaseLoader, Template
 
 DEFAULT_TEMPLATE = '''
 module "{{ MODULE_NAME }}" {
-  source = "../modules/autoscaling/qw_asg"
+  source = "../../../../terraform/modules/autoscaling/qw_asg"
 
   key_name              = "{{ KEY_NAME }}"
   asg_cluster           = "{{ ASG_CLUSTER }}"
-  zones                 = "${var.legacy_zones}"
   asg_queue             = "{{ QUEUE_NAME }}"
   asg_name              = "{{ ASG_NAME }}"
   worker_security_group = ["${var.worker_security_group}"]
   consumer_config       = "{{ CONSUMER_CONFIG }}"
   r53_zone              = "${var.r53_zone}"
   hosted_domain         = "${var.hosted_domain}"
-  vpc_subnet_ids        = ["${aws_subnet.qw.*.id}"]
+  vpc_subnet_ids        = ["${local.c3_supported_subnets}"]
   name_tag              = "${var.name_tag}"
   zookeeper_dns         = "${var.zookeeper_dns}"
   env                   = "${var.env}"
@@ -34,8 +33,8 @@ module "{{ MODULE_NAME }}" {
 '''
 
 # TODO: They only differ in the final piece of the name, templatize better
-LC_TEMPLATE = 'terraform import module.{}.aws_launch_configuration.qw-asg-launch-config {}'
-ASG_TEMPLATE = 'terraform import module.{}.aws_autoscaling_group.qw-asg {}'
+LC_TEMPLATE = 'terraform import module.{}.aws_launch_configuration.qw-asg-launch-config {}\n'
+ASG_TEMPLATE = 'terraform import module.{}.aws_autoscaling_group.qw-asg {}\n'
 
 DEREGISTRATION_ARN = 'arn:aws:sns:us-east-1:368154587575:qw_autoscale_events'
 LIFECYCLE_HOOK_ARN = 'arn:aws:iam::368154587575:role/AutoScalingNotificationAccessRole'
@@ -162,7 +161,7 @@ def get_queue_from_info(asg_info):
 
 def import_statements_from_asg(asg_name, asg_info):
     # asg_info is asg_name -> dictionary of collected infor
-    cluster_name = get_dns_safe_cluster_name(asg_info)
+    cluster_name = get_cluster_name(asg_info)
     return [LC_TEMPLATE.format(cluster_name, asg_info['lc_name']),
             ASG_TEMPLATE.format(cluster_name, asg_name)]
 
